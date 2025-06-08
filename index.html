@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Conversor para o Mercado Livre</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .upload-btn-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+        }
+        .btn {
+            border: 2px solid #6366f1;
+            color: #6366f1;
+            background-color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background-color: #6366f1;
+            color: white;
+        }
+        .upload-btn-wrapper input[type=file] {
+            font-size: 100px;
+            position: absolute;
+            left: 0;
+            top: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid #6366f1;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-4xl text-center">
+        <h1 class="text-2xl md:text-3xl font-bold text-gray-800 mb-2">Conversor para o Mercado Livre</h1>
+        <p class="text-gray-600 mb-6">Envie uma ou mais imagens para convertê-las em JPG 1200x1200 com fundo branco.</p>
+
+        <div class="upload-btn-wrapper mb-6">
+            <button class="btn">Escolher Imagens</button>
+            <input type="file" id="imageLoader" name="filename" accept="image/*" multiple />
+        </div>
+
+        <div id="loadingArea" class="hidden flex-col items-center justify-center mt-6">
+            <div class="loader mb-2"></div>
+            <p class="text-gray-600">Processando imagens...</p>
+        </div>
+        
+        <div id="downloadAllContainer" class="hidden mt-6">
+             <button id="downloadAllBtn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg transition duration-300">
+                Baixar Todas como .ZIP
+            </button>
+        </div>
+
+        <div id="resultsGrid" class="hidden grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6 mt-6">
+        </div>
+        
+        <div id="errorArea" class="hidden bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg relative mt-6" role="alert">
+            <strong class="font-bold">Oops!</strong>
+            <span class="block sm:inline" id="errorMessage"></span>
+        </div>
+        
+        <footer class="mt-8 pt-6 border-t border-gray-200 text-center text-sm text-gray-500">
+            <div class="flex items-center justify-center">
+                <img src="https://avatars.githubusercontent.com/u/130701324?v=4" alt="Foto de Bruna Soug" class="w-10 h-10 rounded-full mr-3 border-2 border-gray-200 shadow">
+                <p>Feito por <a href="https://github.com/BrunaSoug" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:underline font-semibold">Bruna Soug</a> ☕</p>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // author bruna soug
+        const imageLoader = document.getElementById('imageLoader');
+        const resultsGrid = document.getElementById('resultsGrid');
+        const loadingArea = document.getElementById('loadingArea');
+        const errorArea = document.getElementById('errorArea');
+        const errorMessage = document.getElementById('errorMessage');
+        const downloadAllContainer = document.getElementById('downloadAllContainer');
+        const downloadAllBtn = document.getElementById('downloadAllBtn');
+
+        let processedImages = [];
+
+        imageLoader.addEventListener('change', handleImages, false);
+        downloadAllBtn.addEventListener('click', downloadAllAsZip, false);
+
+        async function handleImages(e) {
+            const files = e.target.files;
+            if (files.length === 0) return;
+
+            processedImages = [];
+            resultsGrid.innerHTML = '';
+            resultsGrid.classList.add('hidden');
+            downloadAllContainer.classList.add('hidden');
+            errorArea.classList.add('hidden');
+            loadingArea.classList.remove('hidden');
+            loadingArea.classList.add('flex');
+
+            const processingPromises = Array.from(files).map(processImage);
+
+            const results = await Promise.all(processingPromises);
+            
+            loadingArea.classList.add('hidden');
+            loadingArea.classList.remove('flex');
+
+            let successfulUploads = 0;
+            results.forEach(result => {
+                if (result.status === 'success') {
+                    processedImages.push(result);
+                    const card = createImageCard(result.url, result.filename);
+                    resultsGrid.appendChild(card);
+                    successfulUploads++;
+                } else {
+                    console.error(`Falha ao processar ${result.filename}: ${result.error}`);
+                }
+            });
+
+            if (successfulUploads > 0) {
+                resultsGrid.classList.remove('hidden');
+                downloadAllContainer.classList.remove('hidden');
+            }
+            
+            if (successfulUploads < files.length) {
+                errorMessage.textContent = 'Alguns arquivos não puderam ser processados. Verifique se são imagens válidas.';
+                errorArea.classList.remove('hidden');
+            }
+        }
+
+        function processImage(file) {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = 1200;
+                        canvas.height = 1200;
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = 'white';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                        const imgAspectRatio = img.width / img.height;
+                        let newWidth = canvas.width;
+                        let newHeight = newWidth / imgAspectRatio;
+                        if (newHeight > canvas.height) {
+                            newHeight = canvas.height;
+                            newWidth = newHeight * imgAspectRatio;
+                        }
+
+                        const x = (canvas.width - newWidth) / 2;
+                        const y = (canvas.height - newHeight) / 2;
+                        ctx.drawImage(img, x, y, newWidth, newHeight);
+
+                        const jpegUrl = canvas.toDataURL('image/jpeg', 1.0);
+                        const originalFilename = file.name.split('.').slice(0, -1).join('.') || 'imagem';
+                        
+                        resolve({ 
+                            status: 'success', 
+                            url: jpegUrl, 
+                            filename: `${originalFilename}-1200x1200.jpg` 
+                        });
+                    };
+
+                    img.onerror = () => resolve({ status: 'error', filename: file.name, error: 'Arquivo de imagem inválido' });
+                    img.src = event.target.result;
+                };
+
+                reader.onerror = () => resolve({ status: 'error', filename: file.name, error: 'Erro de leitura de arquivo' });
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function createImageCard(jpegUrl, filename) {
+            const card = document.createElement('div');
+            card.className = 'border rounded-lg p-4 bg-gray-50 flex flex-col items-center shadow-sm text-center';
+
+            const preview = document.createElement('img');
+            preview.src = jpegUrl;
+            preview.alt = `Pré-visualização de ${filename}`;
+            preview.className = 'max-w-full h-auto rounded-md mb-4 border';
+            preview.style.maxHeight = '200px';
+
+            const downloadLink = document.createElement('a');
+            downloadLink.href = jpegUrl;
+            downloadLink.download = filename;
+            downloadLink.className = 'inline-block w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 text-sm';
+            downloadLink.textContent = 'Baixar JPG';
+
+            card.appendChild(preview);
+            card.appendChild(downloadLink);
+
+            return card;
+        }
+
+        function downloadAllAsZip() {
+            if (processedImages.length === 0) return;
+
+            const zip = new JSZip();
+            
+            processedImages.forEach(image => {
+                const base64Data = image.url.split(',')[1];
+                zip.file(image.filename, base64Data, { base64: true });
+            });
+
+            zip.generateAsync({ type: "blob" }).then(function(content) {
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(content);
+                link.download = "imagens-convertidas.zip";
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(link.href);
+            });
+        }
+    </script>
+</body>
+</html>
